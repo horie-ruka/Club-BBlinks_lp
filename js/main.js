@@ -21,6 +21,73 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 350);
     }, 1500);
 
+    // 1-2. ファーストビュー動画背景の自然なループ
+    const heroBgVideos = document.querySelectorAll('.hero-bg-video');
+    if (heroBgVideos.length) {
+        heroBgVideos.forEach(video => {
+            video.muted = true;
+            video.defaultMuted = true;
+            video.playsInline = true;
+            video.loop = false;
+        });
+
+        if (heroBgVideos.length === 1) {
+            heroBgVideos[0].loop = true;
+            heroBgVideos[0].play().catch(() => {});
+        } else {
+            let activeVideoIndex = 0;
+            let isCrossFading = false;
+            const fadeDurationMs = 1200;
+            const fadeBeforeEndSec = 1.35;
+
+            const playFromStart = (video) => {
+                try {
+                    video.currentTime = 0;
+                } catch (error) {
+                    // Some mobile browsers block seeking until metadata is ready.
+                }
+                video.play().catch(() => {});
+            };
+
+            const crossFadeToNext = () => {
+                if (isCrossFading) return;
+                isCrossFading = true;
+
+                const currentVideo = heroBgVideos[activeVideoIndex];
+                const nextVideoIndex = activeVideoIndex === 0 ? 1 : 0;
+                const nextVideo = heroBgVideos[nextVideoIndex];
+
+                playFromStart(nextVideo);
+                nextVideo.classList.add('is-active');
+
+                setTimeout(() => {
+                    currentVideo.classList.remove('is-active');
+                    currentVideo.pause();
+                    activeVideoIndex = nextVideoIndex;
+                    isCrossFading = false;
+                }, fadeDurationMs);
+            };
+
+            heroBgVideos.forEach((video, index) => {
+                video.addEventListener('timeupdate', () => {
+                    if (index !== activeVideoIndex || isCrossFading || !Number.isFinite(video.duration)) return;
+                    if (video.duration > 2 && video.duration - video.currentTime <= fadeBeforeEndSec) {
+                        crossFadeToNext();
+                    }
+                });
+
+                video.addEventListener('ended', () => {
+                    if (index === activeVideoIndex && !isCrossFading) {
+                        crossFadeToNext();
+                    }
+                });
+            });
+
+            heroBgVideos[0].classList.add('is-active');
+            playFromStart(heroBgVideos[0]);
+        }
+    }
+
     // 2. キラキラ粒子の生成
     const particlesContainer = document.getElementById('particles-container');
     const particleCount = 20; // 放射線状の光なので少し数を抑えめに
@@ -74,6 +141,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // 3-2. 応募セクション表示中は下部固定CTAを隠す
+    const contactSection = document.getElementById('contact');
+    if (fixedCta && contactSection) {
+        const contactCtaObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                fixedCta.classList.toggle('is-contact-hidden', entry.isIntersecting);
+            });
+        }, {
+            root: null,
+            threshold: 0.08
+        });
+
+        contactCtaObserver.observe(contactSection);
+    }
+
     // 4. FAQアコーディオン
     const faqQuestions = document.querySelectorAll('.faq-q');
     faqQuestions.forEach(question => {
@@ -88,33 +170,62 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 5. 選ばれる理由のモーダル制御
-    const reasonItems = document.querySelectorAll('.reason-item');
-    const reasonModal = document.getElementById('reason-modal');
-    if (reasonModal) {
-        const modalTitle = document.getElementById('reason-modal-title');
-        const modalDetail = document.getElementById('reason-modal-detail');
-        const closeBtns = document.querySelectorAll('[data-reason-close]');
+    // 5. Web応募フォーム（Web3Forms）
+    const applyForm = document.getElementById('applyForm');
+    const formStatus = document.getElementById('formStatus');
+    if (applyForm) {
+        applyForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
 
-        reasonItems.forEach(item => {
-            item.addEventListener('click', () => {
-                const title = item.getAttribute('data-reason-title');
-                const detail = item.getAttribute('data-reason-detail');
-                if (modalTitle) modalTitle.textContent = title;
-                if (modalDetail) modalDetail.textContent = detail;
-                
-                reasonModal.classList.add('is-open');
-                reasonModal.setAttribute('aria-hidden', 'false');
-                document.body.classList.add('modal-open');
-            });
-        });
+            const submitButton = applyForm.querySelector('.btn-submit');
+            const formData = new FormData(applyForm);
+            const applicantName = String(formData.get('お名前') || '').trim();
+            if (applicantName) {
+                formData.set('subject', `【Club BBlinks求人LP】${applicantName}様よりWEB応募がありました`);
+            }
+            const payload = Object.fromEntries(formData);
 
-        closeBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                reasonModal.classList.remove('is-open');
-                reasonModal.setAttribute('aria-hidden', 'true');
-                document.body.classList.remove('modal-open');
-            });
+            if (formStatus) {
+                formStatus.textContent = '送信中です。少々お待ちください。';
+                formStatus.className = 'form-status is-sending';
+            }
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = '送信中...';
+            }
+
+            try {
+                const response = await fetch(applyForm.action, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    applyForm.reset();
+                    if (formStatus) {
+                        formStatus.textContent = '送信が完了しました。確認後、担当者よりご連絡いたします。';
+                        formStatus.className = 'form-status is-success';
+                    }
+                } else {
+                    throw new Error(result.message || '送信に失敗しました。');
+                }
+            } catch (error) {
+                if (formStatus) {
+                    formStatus.textContent = '送信できませんでした。時間をおいて再度お試しいただくか、LINEからご連絡ください。';
+                    formStatus.className = 'form-status is-error';
+                }
+            } finally {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = '送信する';
+                }
+            }
         });
     }
 
